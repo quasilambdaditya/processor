@@ -41,6 +41,8 @@ module processor#(
             .cout(cout)
             );
             
+        wire [63:0] pc_shift_input = (mode == 1) ? immA : {immB[31:0], immA[31:0]}; 
+            
         shift64 pcShift(
             .mode_unified(mode),
             .uni_dir(1'b1),
@@ -50,7 +52,7 @@ module processor#(
             .lo_dir(1'b1),
             .lo_arith(1'b1),
             .shift_amt(pc_shift_amt),
-            .in_bus(immA),
+            .in_bus(pc_shift_input),
             .out_bus(pc_branch)
         );
  
@@ -71,10 +73,11 @@ module processor#(
                     next_pc = pc_plus1;
                  end
             end else begin
+                next_pc = pc_plus1;
                 if (BranchTakenA && BranchA)
-                    next_pc[31:0] = pc_branch[31:0];
+                    next_pc[31:0] = pc[31:0] + pc_branch[31:0];
                 if (BranchTakenB && BranchB)
-                    next_pc[63:32] = pc_branch[63:32];
+                    next_pc[63:32] = pc[63:32] + pc_branch[31:0];
             end
         end
         
@@ -87,15 +90,18 @@ module processor#(
     // ----------------------------------------------------------------
     // Instruction Memory
     // ----------------------------------------------------------------        
-    wire hi; assign hi = 1'b1;
-    wire [31:0] addrb = pc[63:32] + 32'd512;;  
+    reg [31:0] addrb;
+    always @(posedge clk) begin
+       addrb = $signed(pc[63:32]) + 32'd512;
+    end
+      
     wire [31:0] instrA; wire [31:0] instrB;      
     blk_mem_gen_0 instMem(
         .clka(clk),
         .addra(pc[31:0]),
         .douta(instrA),
         .clkb(clk),
-        .enb(hi),
+        .enb(1'b1),
         .addrb(addrb),
         .doutb(instrB)
   );
