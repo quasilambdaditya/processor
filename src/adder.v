@@ -89,10 +89,7 @@ module adder32 (
     output wire [31:0] sum,
     output wire        cout
 );
-    // --- simple, correct arithmetic expression ---
-    // extend to 33 bits so we capture the final carry
     wire [32:0] result33;
-    // invert B when sub=1 by XORing the extended B with {33{sub}}
     assign result33 = {1'b0, a} + ({1'b0, b} ^ {33{sub}}) + cin;
 
     assign sum  = result33[31:0];
@@ -131,7 +128,6 @@ module adder64(
         .cout(cout_lo)
     );
 
-    // Corrected carry propagation
     wire mid_carry = mode 
                      ? (sub_uni ? ~cout_lo : cout_lo)  // invert carry for subtraction
                      : sub_sig_hi;

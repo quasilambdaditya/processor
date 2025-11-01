@@ -1,36 +1,39 @@
+// ==============================================================
+// Stalling FSM
+// --------------------------------------------------------------
+// To stall the fetching of instructions
+// and writing to registers, due to BRAM 2 cycle
+// read delay
+// ===============================================================
+
 module pcfsm(
-    input  wire clk,
-    output reg  choose   // to choose between next pc or orig pc
+    input wire clk,
+//    input wire reset,
+    output reg pc_choose,       // to choose between next pc or orig pc
+    output reg reg_write_choose // to stall register writes
 );
 
-    // state encoding  0 = next pc, 1 = same pc
-    localparam S0 = 2'b00;
-    localparam S1 = 2'b01;
-    localparam S2 = 2'b10;
+    // pc_choose seq        : o -> 1 -> 1 -> 0 -> 1 -> 1 -> 0 -> 1 ...
+    // reg_write_choose seq : 1 -> 1 -> 0 -> 1 -> 1 -> 0 -> 1 -> 1 ...
 
-    reg [1:0] state, next_state;
-
+    reg [2:0] states;
+    initial begin
+            states[0] = 1'b1;
+            states[1] = 1'b0;
+            states[2] = 1'b0;        
+    end
     always @(posedge clk) begin
-        next_state = state;
-        case (state)
-            S0: next_state = S1;
-            S1: next_state = S2;
-            S2: next_state = S0;
-            default: next_state = S0;
-        endcase
+//        if (reset) begin
+//            states[0] <= 1'b1;
+//            states[1] <= 1'b0;
+//            states[2] <= 1'b0;
+//        end else begin
+            states[0] <= states[2];
+            states[1] <= states[0];
+            states[2] <= states[1];
+//        end
+        pc_choose = ~states[0];
+        reg_write_choose = ~states[2];
     end
-
-    always @(posedge clk) begin
-        state <= next_state;
-    end
-
-    always @(*) begin
-        case (state)
-            S0: choose = 1'b0;
-            S1: choose = 1'b1;
-            S2: choose = 1'b1;
-            default: choose = 1'b0;
-        endcase
-    end
-
+   
 endmodule

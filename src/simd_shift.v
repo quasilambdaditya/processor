@@ -123,6 +123,7 @@ module shift64 (
     wire [31:0] left_lo_klt  = lo_shifter_out;                 // in_lo << k
     wire [31:0] left_hi_klt  = hi_shifter_out | lo_to_hi;     // (in_hi << k) | (in_lo >> (32-k))
 
+    // right direction K<32:
     wire [31:0] right_lo_klt       = (k_is_zero) ? in_lo : ((in_lo >> uni_shift) | hi_to_lo);
     wire [31:0] right_hi_log_klt   = (k_is_zero) ? in_hi : (in_hi >> uni_shift);
     wire [31:0] right_hi_arith_klt = (k_is_zero) ? in_hi : ($signed(in_hi) >>> uni_shift);
@@ -130,29 +131,50 @@ module shift64 (
     wire [31:0] uni_lo_klt32  = (uni_dir == 1'b0) ? left_lo_klt  : right_lo_klt;
     wire [31:0] uni_hi_klt32  = (uni_dir == 1'b0) ? left_hi_klt  : (uni_arith ? right_hi_arith_klt : right_hi_log_klt);
 
+    // ---- K >= 32 case ----
+    // r = K - 32 ; stored in uni_shift (0..31)
     wire [4:0] r = uni_shift;
 
+    // LEFT, K>=32:
+    // lower_out = 0
+    // upper_out = in_lo << r   ; when r==0 (K==32) this becomes in_lo (correct)
     wire [31:0] left_lo_kge = 32'b0;
     wire [31:0] left_hi_kge = (r == 5'd0) ? in_lo : (in_lo << r);
 
+    // LOGICAL RIGHT, K>=32:
+    // lower_out = in_hi >> r   ; when r==0 (K==32) this becomes in_hi (correct)
+    // upper_out = 0
     wire [31:0] right_lo_kge_log = (r == 5'd0) ? in_hi : (in_hi >> r);
     wire [31:0] right_hi_kge_log = 32'b0;
 
+    // ARITH RIGHT, K>=32: (kept for non-arith-unified fallback)
+    // lower_out = arithmetic_right(in_hi, r)
+    // upper_out = sign replicate (all bits = MSB of 64-bit input)
     wire [31:0] right_lo_kge_arith = (r == 5'd0) ? in_hi : ($signed(in_hi) >>> r);
     wire [31:0] right_hi_kge_arith = {32{in_bus[63]}}; // sign replicate top bit of 64-bit input
 
     wire [31:0] uni_lo_kge32 = (uni_dir == 1'b0) ? left_lo_kge : (uni_arith ? right_lo_kge_arith : right_lo_kge_log);
     wire [31:0] uni_hi_kge32 = (uni_dir == 1'b0) ? left_hi_kge : (uni_arith ? right_hi_kge_arith : right_hi_kge_log);
 
+    // Non-arithmetic unified results (existing logic covers both K<32 and K>=32)
     wire [31:0] unified_lo_nonarith = uni_ge_32 ? uni_lo_kge32 : uni_lo_klt32;
     wire [31:0] unified_hi_nonarith = uni_ge_32 ? uni_hi_kge32 : uni_hi_klt32;
 
+    // ----------------------------
+    // TRUE 64-bit arithmetic right (when unified & right & arithmetic)
+    // ----------------------------
+    // Compute a true signed 64-bit arithmetic shift and split it.
+    // This guarantees correct behavior for all K (0..63), including K==63 -> all sign bits.
     wire signed [63:0] signed_in64 = $signed(in_bus);
     wire signed [63:0] shifted64_arith = signed_in64 >>> uni_amt; // uni_amt is 6 bits (0..63)
 
+    // Final unified selection:
+    // - If in unified mode AND performing a 64-bit arithmetic right shift, use the true 64-bit result.
+    // - Otherwise use the (previous) non-arithmetic / split-combined logic.
     wire [31:0] unified_lo = (mode_unified && uni_dir && uni_arith) ? shifted64_arith[31:0] : unified_lo_nonarith;
     wire [31:0] unified_hi = (mode_unified && uni_dir && uni_arith) ? shifted64_arith[63:32] : unified_hi_nonarith;
 
+    // Final out: either unified combined outputs or split-mode outputs
     assign out_bus = mode_unified ? {unified_hi, unified_lo} : {hi_shifter_out, lo_shifter_out};
 
 endmodule

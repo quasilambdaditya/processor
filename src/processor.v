@@ -11,39 +11,78 @@ module processor#(
     // ----------------------------------------------------------------
     // Program Counter
     // ----------------------------------------------------------------
-        wire choose;
+        reg [63:0] pc;     
+        reg [63:0] next_pc;
+        reg rst;
+        wire BranchA, BranchB;
+        wire [63:0] pc_update_amt = (mode) ? 64'd1 : {32'd1, 32'd1}; 
+        
+        wire [63:0] immA, immB;
+        wire [63:0] pc_shift_amt = (mode) ? 64'd2 : {32'd2, 32'd2};
+               
+        wire [63:0] pc_plus1; wire cout;
+        
+        wire pc_choose, reg_write_choose;
+        
+        wire [63:0] pc_branch;
+        
+        initial begin
+            pc = -64'd1;
+        end
+                
+        adder64 pcAdder(
+            .a(pc),
+            .b(pc_update_amt),
+            .mode(mode),
+            .sub_uni(1'b0),
+            .sub_hi(1'b0),
+            .sub_lo(1'b0),
+            .sum(pc_plus1),
+            .cout(cout)
+            );
+            
+        shift64 pcShift(
+            .mode_unified(mode),
+            .uni_dir(1'b1),
+            .uni_arith(1'b1),
+            .hi_dir(1'b1),
+            .hi_arith(1'b1),
+            .lo_dir(1'b1),
+            .lo_arith(1'b1),
+            .shift_amt(pc_shift_amt),
+            .in_bus(immA),
+            .out_bus(pc_branch)
+        );
+ 
+
         pcfsm pcfsmInst(
             .clk(clk),
-            .choose(choose)
+//            .reset(rst),
+            .pc_choose(pc_choose),
+            .reg_write_choose(reg_write_choose)
         );
-        reg [63:0] pc;
-        reg [63:0] next_pc;
-        wire BranchTakenA;
-        wire BranchTakenB;
-        wire [63:0] immA; wire [63:0] immB;
-        initial begin
-            pc = 64'b0;
-            next_pc = 64'b0;   
-        end
-
-        always @(posedge clk) begin
+        
+         always @(*) begin
+ //           next_pc = pc_plus1;
             if (mode) begin
-                // 64-bit mode
-                if (BranchTakenA)
-                    next_pc <= pc + ($signed(immA) >> 2);        // jump to immediate target
-                else
-                    next_pc <= pc + 64'd1;  // normal increment
+                if (BranchTakenA && BranchA)
+                    next_pc = pc + pc_branch;
+                 else begin 
+                    next_pc = pc_plus1;
+                 end
+            end else begin
+                if (BranchTakenA && BranchA)
+                    next_pc[31:0] = pc_branch[31:0];
+                if (BranchTakenB && BranchB)
+                    next_pc[63:32] = pc_branch[63:32];
             end
-            else begin
-                // 32-bit mode
-                if (BranchTakenA)
-                    next_pc[31:0] <= pc[31:0] + ($signed(immA[31:0]) >> 2);
-                else
-                    next_pc[31:0] <= pc[31:0] + 32'd1;
-            end
-            pc <= (choose) ? pc : next_pc;
         end
-    
+        
+        always @(posedge clk) begin
+            if (~pc_choose) begin pc <= next_pc; end
+        end
+        
+        
 
     // ----------------------------------------------------------------
     // Instruction Memory
@@ -80,8 +119,8 @@ module processor#(
     register_file regfileInst(
         .clk(clk),
         .mode(mode),
-        .write_enA(MemWriteA),   // figure this out, will change later
-        .write_enB(MemWriteB),   // figure this out, will change later
+        .write_enA(MemWriteA & ~reg_write_choose),   // figure this out, will change later
+        .write_enB(MemWriteB & ~reg_write_choose),   // figure this out, will change later
         .rdA(rdA),
         .rdB(rdB),
         .write_data(finalResult),
@@ -102,7 +141,6 @@ module processor#(
     wire [2:0] ALUOpA; wire [2:0] ALUOpB;
     wire [5:0] ALUCtrl; 
     wire ALUSrcA; wire ALUSrcB;
-    wire BranchA, BranchB;
     wire [2:0] BranchTypeA; wire [2:0] BranchTypeB;
     control_unit ctrlUnitInst(
         .opcodeA(instrA[6:0]),
