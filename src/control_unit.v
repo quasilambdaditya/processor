@@ -1,6 +1,5 @@
 // =====================================================
-// RISC-V Control Unit (Purely Combinational)
-// Parameterized for Dual Issue (A/B) and Unified/Split Mode
+// RISC-V Control Unit
 // =====================================================
 
 module control_unit (
@@ -10,15 +9,35 @@ module control_unit (
     input  wire [2:0] funct3B,
     input  wire [6:0] funct7A,
     input  wire [6:0] funct7B,
+    
     input  wire       mode,       // 1 = unified, 0 = split 
 
     output wire [2:0] ALUOpA,
     output wire [2:0] ALUOpB,
+    
     output wire [5:0] ALUCtrl,
+    
     output wire       ALUSrcA,
     output wire       ALUSrcB,
+    
+    output wire       RegWriteA,
+    output wire       RegWriteB,
+    
     output wire       MemWriteA,
     output wire       MemWriteB,
+    
+    output wire       MemToRegA,
+    output wire       MemToRegB,
+    
+    output wire [1:0] read_write_amtA,
+    output wire [1:0] read_write_amtB,
+    
+    output wire       unsigned_readA,
+    output wire       unsigned_readB,
+    
+    output wire       DMEMEnableA,
+    output wire       DMEMEnableB,
+        
     output wire       BranchA,
     output wire       BranchB,
     output wire [2:0] BranchTypeA,
@@ -45,6 +64,9 @@ module control_unit (
     localparam F3_AND     = 3'b111;
     localparam F3_OR      = 3'b110;
     localparam F3_XOR     = 3'b100;
+    localparam F3_LBU     = 3'b100;
+    localparam F3_LHU     = 3'b101;
+    localparam F3_LWU     = 3'b110;
 
     localparam F3_BEQ     = 3'b000;
     localparam F3_BNE     = 3'b001;
@@ -122,11 +144,65 @@ module control_unit (
     assign ALUCtrl = (mode == 1'b1) ? alu_ctrl_unified : alu_ctrl_split;
 
     // ==================================================
-    // MemWrite
+    // RegWrite
     // ==================================================
-    assign MemWriteA = (opcodeA == OPC_RTYPE || opcodeA == OPC_ITYPE);
-    assign MemWriteB = (opcodeB == OPC_RTYPE || opcodeB == OPC_ITYPE);
+    assign RegWriteA = (opcodeA == OPC_RTYPE || opcodeA == OPC_ITYPE || opcodeA == OPC_LOAD);
+    assign RegWriteB = (opcodeB == OPC_RTYPE || opcodeB == OPC_ITYPE || opcodeB == OPC_LOAD);
+    
+    // ==================================================
+    // MemWrite
+    // ==================================================  
+    assign MemWriteA = (opcodeA == OPC_STORE);
+    assign MemWriteB = (opcodeB == OPC_STORE);  
+    
+    // ==================================================
+    // DMEMEnable
+    // ==================================================  
+    assign DMEMEnableA = (opcodeA == OPC_LOAD || opcodeA == OPC_STORE);
+    assign DMEMEnableB = (opcodeB == OPC_LOAD || opcodeB == OPC_STORE);  
+    
+    // ==================================================
+    // MemToReg
+    // ==================================================  
+    assign MemToRegA = (opcodeA == OPC_LOAD);
+    assign MemToRegB = (opcodeB == OPC_LOAD);  
 
+    // ==================================================
+    // Unsigned Read
+    // ==================================================    
+    assign unsigned_readA = (opcodeA == OPC_LOAD && 
+            (funct3A == 3'd4 || funct3A == 3'd5 || funct3A == 3'd6));
+    assign unsigned_readB = (opcodeB == OPC_LOAD && 
+            (funct3B == 3'd4 || funct3B == 3'd5 || funct3B == 3'd6));
+  
+    // ==================================================
+    // Read/Write Amount
+    // ==================================================                
+    // For A: handle loads and stores
+    assign read_write_amtA =
+        ( (opcodeA == OPC_LOAD && (funct3A == 3'd0 || funct3A == 3'd4)) ||
+          (opcodeA == OPC_STORE &&  (funct3A == 3'd0)) ) ? 2'd0 : // byte (SB / LB / LBU)
+        ( (opcodeA == OPC_LOAD && (funct3A == 3'd1 || funct3A == 3'd5)) ||
+          (opcodeA == OPC_STORE &&  (funct3A == 3'd1)) ) ? 2'd1 : // half (SH / LH / LHU)
+        ( (opcodeA == OPC_LOAD && (funct3A == 3'd2 || funct3A == 3'd6)) ||
+          (opcodeA == OPC_STORE &&  (funct3A == 3'd2)) ) ? 2'd2 : // word (SW / LW / LWU)
+        ( (opcodeA == OPC_LOAD && (funct3A == 3'd3)) ||
+          (opcodeA == OPC_STORE &&  (funct3A == 3'd3)) ) ? 2'd3 : // dword (SD)
+        2'd0;
+    
+    // For B:
+    assign read_write_amtB =
+        ( (opcodeB == OPC_LOAD && (funct3B == 3'd0 || funct3B == 3'd4)) ||
+          (opcodeB == OPC_STORE &&  (funct3B == 3'd0)) ) ? 2'd0 :
+        ( (opcodeB == OPC_LOAD && (funct3B == 3'd1 || funct3B == 3'd5)) ||
+          (opcodeB == OPC_STORE &&  (funct3B == 3'd1)) ) ? 2'd1 :
+        ( (opcodeB == OPC_LOAD && (funct3B == 3'd2 || funct3B == 3'd6)) ||
+          (opcodeB == OPC_STORE &&  (funct3B == 3'd2)) ) ? 2'd2 :
+        ( (opcodeB == OPC_LOAD && (funct3B == 3'd3)) ||
+          (opcodeB == OPC_STORE &&  (funct3B == 3'd3)) ) ? 2'd3 :
+        2'd0;
+    
+     
     // ==================================================
     // Branch Detection Logic
     // ==================================================

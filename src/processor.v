@@ -22,7 +22,7 @@ module processor#(
                
         wire [63:0] pc_plus1; wire cout;
         
-        wire pc_choose, reg_write_choose;
+        wire pc_choose, reg_write_choose, mem_stall;
         
         wire [63:0] pc_branch;
         
@@ -61,11 +61,11 @@ module processor#(
             .clk(clk),
 //            .reset(rst),
             .pc_choose(pc_choose),
-            .reg_write_choose(reg_write_choose)
+            .reg_write_choose(reg_write_choose),
+            .mem_stall(mem_stall)
         );
         
          always @(*) begin
- //           next_pc = pc_plus1;
             if (mode) begin
                 if (BranchTakenA && BranchA)
                     next_pc = pc + pc_branch;
@@ -119,17 +119,17 @@ module processor#(
     
     wire [63:0] read_dataA1; wire [63:0] read_dataA2;
     wire [63:0] read_dataB1; wire [63:0] read_dataB2;
-    wire [63:0] finalResult;
-    wire MemWriteA; wire MemWriteB;
+    wire [63:0] reg_file_write_data;
+    wire RegWriteA; wire RegWriteB;
 
     register_file regfileInst(
         .clk(clk),
         .mode(mode),
-        .write_enA(MemWriteA & ~reg_write_choose),   // figure this out, will change later
-        .write_enB(MemWriteB & ~reg_write_choose),   // figure this out, will change later
+        .write_enA(RegWriteA & ~reg_write_choose),   // figure this out, will change later
+        .write_enB(RegWriteB & ~reg_write_choose),   // figure this out, will change later
         .rdA(rdA),
         .rdB(rdB),
-        .write_data(finalResult),
+        .write_data(reg_file_write_data),
         .rs1A(rs1A),
         .rs2A(rs2A),
         .rs1B(rs1B),
@@ -148,6 +148,11 @@ module processor#(
     wire [5:0] ALUCtrl; 
     wire ALUSrcA; wire ALUSrcB;
     wire [2:0] BranchTypeA; wire [2:0] BranchTypeB;
+    wire [1:0] read_write_amtA; wire [1:0] read_write_amtB;
+    wire MemWriteA; wire MemWriteB;
+    wire MemToRegA; wire MemToRegB;
+    wire DMEMEnableA; wire DMEMEnableB;
+    wire unsigned_readA; wire unsigned_readB;
     control_unit ctrlUnitInst(
         .opcodeA(instrA[6:0]),
         .opcodeB(instrB[6:0]),
@@ -161,8 +166,18 @@ module processor#(
         .ALUCtrl(ALUCtrl),
         .ALUSrcA(ALUSrcA),
         .ALUSrcB(ALUSrcB),
+        .RegWriteA(RegWriteA),
+        .RegWriteB(RegWriteB),
         .MemWriteA(MemWriteA),
         .MemWriteB(MemWriteB),
+        .MemToRegA(MemToRegA),
+        .MemToRegB(MemToRegB),
+        .DMEMEnableA(DMEMEnableA),
+        .DMEMEnableB(DMEMEnableB),
+        .read_write_amtA(read_write_amtA),
+        .read_write_amtB(read_write_amtB),
+        .unsigned_readA(unsigned_readA),
+        .unsigned_readB(unsigned_readB),
         .BranchA(BranchA),
         .BranchB(BranchB),
         .BranchTypeA(BranchTypeA),
@@ -182,6 +197,7 @@ module processor#(
 
     // Choosing ALU Operand using ALUSrc
     wire [63:0] ALUOperandA; wire [63:0] ALUOperandB;
+ 
     assign ALUOperandA = (ALUSrcA) ? immA : read_dataA2;
     assign ALUOperandB = (ALUSrcB) ? immB : read_dataB2;
 
@@ -194,7 +210,7 @@ module processor#(
         .rs2A(ALUOperandA),
         .rs1B(read_dataB1),
         .rs2B(ALUOperandB),
-        .ALUSrcB(ALUSrcB),    // new addition
+        .ALUSrcB(ALUSrcB),
         .mode(mode),
         .outputA(ALUInputA),
         .outputB(ALUInputB)
@@ -204,6 +220,7 @@ module processor#(
     // ALU
     // ----------------------------------------------------------------
     wire eqA, sltA, ultA, eqB, sltB, ultB;
+    wire [63:0] ALUOutput;
     ALU aluInst(
         .a(ALUInputA),
         .b(ALUInputB),
@@ -211,7 +228,7 @@ module processor#(
         .ALUOpA(ALUOpA),
         .ALUOpB(ALUOpB),
         .ALUCtrl(ALUCtrl),
-        .result(finalResult),
+        .result(ALUOutput),
         .eqA(eqA),
         .sltA(sltA),
         .ultA(ultA),
@@ -220,8 +237,29 @@ module processor#(
         .ultB(ultB) 
     );
 
-    assign result = finalResult;
- 
+    // ----------------------------------------------------------------
+    // Data Memory
+    // ----------------------------------------------------------------
+    wire [63:0] dout;
+    data_mem_unit dmemInst(
+        .clk(clk),
+        .mode(mode),
+        .addr(ALUOutput),
+        .write_data(ALUInputB),
+        .ena(DMEMEnableA & ~mem_stall),
+        .enb(DMEMEnableB & ~mem_stall),
+        .wea(MemWriteA & ~mem_stall),
+        .web(MemWriteB & ~mem_stall),
+        .read_write_amtA(read_write_amtA),
+        .read_write_amtB(read_write_amtB),
+        .unsigned_readA(unsigned_readA),
+        .unsigned_readB(unsigned_readB),
+        .dout(dout)
+    );
+    
+    assign reg_file_write_data = (mode) ? (MemToRegA ? dout : ALUOutput) :
+            {(MemToRegB ? dout[63:32] : ALUOutput[63:32]), (MemToRegA ? dout[31:0]  : ALUOutput[31:0])};
+
     // ----------------------------------------------------------------
     // Branch Decision
     // ----------------------------------------------------------------    
